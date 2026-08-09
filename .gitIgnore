@@ -1,0 +1,80 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# JetBrains Rider
+.idea/
+*.sln.iml
+
+# VS Code local settings
+.vscode/
+
+# Test results
+TestResults/
+*.trx
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local environment/configuration
+.env
+.env.*
+!.env.example
+
+# Local secrets
+secrets.json
+appsettings.Local.json
+appsettings.Development.local.json
+
+# Local database files
+*.db
+*.db-shm
+*.db-wal
+*.mdf
+*.ldf
+
+# Docker/local overrides
+docker-compose.override.yml
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Benchmark output
+BenchmarkDotNet.Artifacts/
+
+# ReSharper
+_ReSharper*/
+*.DotSettings.user
+
+# Publish output
+publish/
+
+# Generated artifacts
+artifacts/
