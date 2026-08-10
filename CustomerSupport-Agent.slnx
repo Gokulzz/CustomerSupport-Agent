@@ -2,7 +2,7 @@
   <Project Path="CustomerSupport.API/CustomerSupport.Api.csproj" />
   <Project Path="CustomerSupport.Application.Tests/CustomerSupport.Application.Tests.csproj" />
   <Project Path="CustomerSupport.Application/CustomerSupport.Application.csproj" />
-  <Project Path="CustomerSupport.Domain/CustomerSupport.Domain.csproj" />
   <Project Path="CustomerSupport.Domain.Tests/CustomerSupport.Domain.Tests.csproj" />
+  <Project Path="CustomerSupport.Domain/CustomerSupport.Domain.csproj" />
   <Project Path="CustomerSupport.Infrastructure/CustomerSupport.Infrastructure.csproj" />
 </Solution>
