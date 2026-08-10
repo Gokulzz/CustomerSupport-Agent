@@ -1,4 +1,4 @@
-using CustomerSupport.Application.Common;
+using CustomerSupport.Application.Results;
 using Xunit;
 
 namespace CustomerSupport.Application.Tests.Common;

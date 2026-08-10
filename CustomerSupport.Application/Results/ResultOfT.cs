@@ -1,4 +1,4 @@
-namespace CustomerSupport.Application.Common;
+namespace CustomerSupport.Application.Results;
 
 public sealed class Result<T>
 {

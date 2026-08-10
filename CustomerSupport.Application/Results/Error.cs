@@ -1,4 +1,4 @@
-namespace CustomerSupport.Application.Common;
+namespace CustomerSupport.Application.Results;
 
 public sealed record Error(string Code, string Description)
 {
