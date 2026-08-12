@@ -1,4 +1,5 @@
 using CustomerSupport.Infrastructure.Persistence;
+using CustomerSupport.Infrastructure.Persistence.Seeding;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,6 +27,7 @@ public static class InfrastrucureServiceCollectionExtensions
 
         services.AddDbContext<SupportDbContext>(options =>
             options.UseSqlServer(connectionString));
+        services.AddScoped<DevelopmentDataSeeder>();
 
         return services;
     }

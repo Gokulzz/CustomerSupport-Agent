@@ -23,6 +23,7 @@ app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
 {
+    await app.Services.SeedDevelopmentDataAsync();
     app.UseSwagger();
     app.UseSwaggerUI();
 }
