@@ -1,4 +1,6 @@
+using CustomerSupport.Api.Authentication;
 using CustomerSupport.Api.ExceptionHandling;
+using CustomerSupport.Api.OpenApi;
 using CustomerSupport.Infrastructure;
 using Serilog;
 
@@ -10,10 +12,11 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Services(services));
 
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddApiAuthentication();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddOpenApi();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerWithBearerAuthentication();
 builder.Services.AddEndpointsApiExplorer();
 
 var app = builder.Build();
@@ -29,6 +32,10 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapAuthenticationEndpoints();
 
 app.Run();
 

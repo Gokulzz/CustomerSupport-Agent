@@ -3,6 +3,8 @@ using CustomerSupport.Domain.Invoices;
 using CustomerSupport.Domain.Plans;
 using CustomerSupport.Domain.Subscriptions;
 using CustomerSupport.Domain.SupportTickets;
+using CustomerSupport.Infrastructure.Identity;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -10,8 +12,16 @@ namespace CustomerSupport.Infrastructure.Persistence.Seeding;
 
 public sealed class DevelopmentDataSeeder(
     SupportDbContext dbContext,
+    UserManager<ApplicationUser> userManager,
     ILogger<DevelopmentDataSeeder> logger)
 {
+    private const string AliceEmail = "alice@clouddesk.test";
+    private const string BobEmail = "bob@clouddesk.test";
+    private const string CharlieEmail = "charlie@clouddesk.test";
+    private const string AlicePassword = "AliceDev!2026";
+    private const string BobPassword = "BobDev!2026";
+    private const string CharliePassword = "CharlieDev!2026";
+
     private static readonly DateTimeOffset ReferenceDateUtc =
         new(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
 
@@ -24,10 +34,12 @@ public sealed class DevelopmentDataSeeder(
         await SeedSupportTicketsAsync(cancellationToken);
 
         var addedEntityCount = await dbContext.SaveChangesAsync(cancellationToken);
+        var addedIdentityUserCount = await SeedIdentityUsersAsync();
 
         logger.LogInformation(
-            "Development data seeding completed. Added {AddedEntityCount} entities.",
-            addedEntityCount);
+            "Development data seeding completed. Added {AddedEntityCount} domain entities and {AddedIdentityUserCount} identity users.",
+            addedEntityCount,
+            addedIdentityUserCount);
     }
 
     private async Task SeedPlansAsync(CancellationToken cancellationToken)
@@ -223,5 +235,74 @@ public sealed class DevelopmentDataSeeder(
                 "The project export remains in progress and never completes.",
                 new DateTimeOffset(2026, 8, 8, 12, 0, 0, TimeSpan.Zero)));
         }
+    }
+
+    private async Task<int> SeedIdentityUsersAsync()
+    {
+        var addedUserCount = 0;
+
+        addedUserCount += await SeedIdentityUserAsync(
+            SeedIds.AliceUserId,
+            SeedIds.AliceCustomerId,
+            AliceEmail,
+            AlicePassword);
+        addedUserCount += await SeedIdentityUserAsync(
+            SeedIds.BobUserId,
+            SeedIds.BobCustomerId,
+            BobEmail,
+            BobPassword);
+        addedUserCount += await SeedIdentityUserAsync(
+            SeedIds.CharlieUserId,
+            SeedIds.CharlieCustomerId,
+            CharlieEmail,
+            CharliePassword);
+
+        return addedUserCount;
+    }
+
+    private async Task<int> SeedIdentityUserAsync(
+        Guid userId,
+        Guid customerId,
+        string email,
+        string password)
+    {
+        var userById = await userManager.FindByIdAsync(userId.ToString());
+        var userByEmail = await userManager.FindByEmailAsync(email);
+        var existingUser = userById ?? userByEmail;
+
+        if (existingUser is not null)
+        {
+            if (existingUser.Id != userId ||
+                existingUser.CustomerId != customerId ||
+                !string.Equals(existingUser.Email, email, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Development identity seed data conflicts with the existing user '{email}'.");
+            }
+
+            return 0;
+        }
+
+        var user = new ApplicationUser
+        {
+            Id = userId,
+            CustomerId = customerId,
+            UserName = email,
+            Email = email,
+            EmailConfirmed = true
+        };
+        var result = await userManager.CreateAsync(user, password);
+
+        if (!result.Succeeded)
+        {
+            var errors = string.Join(
+                "; ",
+                result.Errors.Select(error => $"{error.Code}: {error.Description}"));
+
+            throw new InvalidOperationException(
+                $"Could not create development identity user '{email}': {errors}");
+        }
+
+        return 1;
     }
 }

@@ -21,4 +21,8 @@ public static class SeedIds
     public static readonly Guid BobFailedInvoiceId = Guid.Parse("40000000-0000-0000-0000-000000000005");
 
     public static readonly Guid AliceOpenSupportTicketId = Guid.Parse("50000000-0000-0000-0000-000000000001");
+
+    public static readonly Guid AliceUserId = Guid.Parse("60000000-0000-0000-0000-000000000001");
+    public static readonly Guid BobUserId = Guid.Parse("60000000-0000-0000-0000-000000000002");
+    public static readonly Guid CharlieUserId = Guid.Parse("60000000-0000-0000-0000-000000000003");
 }

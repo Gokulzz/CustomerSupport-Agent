@@ -3,11 +3,13 @@ using CustomerSupport.Domain.Invoices;
 using CustomerSupport.Domain.Plans;
 using CustomerSupport.Domain.Subscriptions;
 using CustomerSupport.Domain.SupportTickets;
+using CustomerSupport.Infrastructure.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace CustomerSupport.Infrastructure.Persistence
 {
-    public sealed class SupportDbContext : DbContext
+    public sealed class SupportDbContext : IdentityUserContext<ApplicationUser, Guid>
     {
         public SupportDbContext(DbContextOptions<SupportDbContext> options) : base(options)
         {
