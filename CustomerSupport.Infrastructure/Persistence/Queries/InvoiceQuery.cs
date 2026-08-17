@@ -1,4 +1,5 @@
 using CustomerSupport.Application.Invoices;
+using CustomerSupport.Domain.Invoices;
 using Microsoft.EntityFrameworkCore;
 
 namespace CustomerSupport.Infrastructure.Persistence.Queries;
@@ -35,4 +36,14 @@ internal sealed class InvoiceQuery(SupportDbContext dbContext) : IInvoiceQuery
                 invoice.PaidAtUtc))
             .ToArray();
     }
+
+    public Task<Invoice?> GetByIdAndCustomerIdAsync(
+        Guid invoiceId,
+        Guid customerId,
+        CancellationToken cancellationToken = default) =>
+        dbContext.Invoices
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                invoice => invoice.Id == invoiceId && invoice.CustomerId == customerId,
+                cancellationToken);
 }

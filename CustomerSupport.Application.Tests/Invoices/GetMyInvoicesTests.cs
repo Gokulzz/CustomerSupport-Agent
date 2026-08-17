@@ -1,5 +1,6 @@
 using CustomerSupport.Application.Authentication;
 using CustomerSupport.Application.Invoices;
+using CustomerSupport.Domain.Invoices;
 using Xunit;
 
 namespace CustomerSupport.Application.Tests.Invoices;
@@ -76,5 +77,11 @@ public sealed class GetMyInvoicesTests
 
             return Task.FromResult(response);
         }
+
+        public Task<Invoice?> GetByIdAndCustomerIdAsync(
+            Guid invoiceId,
+            Guid customerId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<Invoice?>(null);
     }
 }

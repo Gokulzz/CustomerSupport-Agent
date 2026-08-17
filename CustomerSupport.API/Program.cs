@@ -3,6 +3,7 @@ using CustomerSupport.Api.ExceptionHandling;
 using CustomerSupport.Api.Invoices;
 using CustomerSupport.Api.OpenApi;
 using CustomerSupport.Api.Subscriptions;
+using CustomerSupport.Api.SupportTickets;
 using CustomerSupport.Infrastructure;
 using Serilog;
 
@@ -40,6 +41,7 @@ app.UseAuthorization();
 app.MapAuthenticationEndpoints();
 app.MapSubscriptionEndpoints();
 app.MapInvoiceEndpoints();
+app.MapSupportTicketEndpoints();
 
 app.Run();
 

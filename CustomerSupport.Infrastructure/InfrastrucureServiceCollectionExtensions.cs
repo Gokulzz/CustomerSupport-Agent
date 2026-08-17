@@ -2,10 +2,12 @@ using System.Text;
 using CustomerSupport.Application.Authentication;
 using CustomerSupport.Application.Invoices;
 using CustomerSupport.Application.Subscriptions;
+using CustomerSupport.Application.SupportTickets;
 using CustomerSupport.Infrastructure.Authentication;
 using CustomerSupport.Infrastructure.Identity;
 using CustomerSupport.Infrastructure.Persistence;
 using CustomerSupport.Infrastructure.Persistence.Queries;
+using CustomerSupport.Infrastructure.Persistence.Repositories;
 using CustomerSupport.Infrastructure.Persistence.Seeding;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -66,7 +68,10 @@ public static class InfrastrucureServiceCollectionExtensions
         services.AddScoped<ISubscriptionQuery, SubscriptionQuery>();
         services.AddScoped<IInvoiceQuery, InvoiceQuery>();
         services.AddScoped<GetMyInvoices>();
+        services.AddScoped<CheckRefundEligibility>();
         services.AddScoped<GetMySubscription>();
+        services.AddScoped<ISupportTicketRepository, SupportTicketRepository>();
+        services.AddScoped<CreateSupportTicket>();
         services.AddScoped<DevelopmentDataSeeder>();
 
         return services;
