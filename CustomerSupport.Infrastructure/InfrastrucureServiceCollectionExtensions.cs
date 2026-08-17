@@ -1,8 +1,11 @@
 using System.Text;
 using CustomerSupport.Application.Authentication;
+using CustomerSupport.Application.Invoices;
+using CustomerSupport.Application.Subscriptions;
 using CustomerSupport.Infrastructure.Authentication;
 using CustomerSupport.Infrastructure.Identity;
 using CustomerSupport.Infrastructure.Persistence;
+using CustomerSupport.Infrastructure.Persistence.Queries;
 using CustomerSupport.Infrastructure.Persistence.Seeding;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -60,6 +63,10 @@ public static class InfrastrucureServiceCollectionExtensions
         services.AddAuthorization();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IAccessTokenService, JwtAccessTokenService>();
+        services.AddScoped<ISubscriptionQuery, SubscriptionQuery>();
+        services.AddScoped<IInvoiceQuery, InvoiceQuery>();
+        services.AddScoped<GetMyInvoices>();
+        services.AddScoped<GetMySubscription>();
         services.AddScoped<DevelopmentDataSeeder>();
 
         return services;

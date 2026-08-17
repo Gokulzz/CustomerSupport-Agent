@@ -19,7 +19,7 @@ internal sealed class HttpContextCurrentCustomer(IHttpContextAccessor httpContex
 
             var customerIdValue = httpContext.User.FindFirst("customer_id")?.Value;
 
-            if (!Guid.TryParse(customerIdValue, out var customerId) || customerId == Guid.Empty)
+            if (!Guid.TryParse(customerIdValue, out Guid customerId) || customerId == Guid.Empty)
             {
                 throw new InvalidOperationException(
                     "The authenticated access token does not contain a valid customer identifier.");
