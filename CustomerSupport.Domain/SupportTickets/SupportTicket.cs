@@ -31,6 +31,8 @@ public sealed class SupportTicket
 
     public DateTimeOffset? ClosedAtUtc { get; private set; }
 
+    public DateTimeOffset? EscalatedAtUtc { get; private set; } 
+
     public static SupportTicket Create(
         Guid id,
         Guid customerId,
@@ -78,4 +80,20 @@ public sealed class SupportTicket
 
         return CloseTicketOutcome.Success;
     }
+
+    public EscalateTicketOutcome Escalate(DateTimeOffset escalatedAtUtc)
+    {
+        if (Status == TicketStatus.Closed)
+        {
+            return EscalateTicketOutcome.AlreadyClosed;
+        }
+        if (Status == TicketStatus.Escalated)
+        {
+            return EscalateTicketOutcome.AlreadyEscalated;
+        }
+        var escalatedAt = escalatedAtUtc.ToUniversalTime();
+        Status = TicketStatus.Escalated;
+        EscalatedAtUtc = escalatedAt;
+        return EscalateTicketOutcome.Success;
+    }   
 }

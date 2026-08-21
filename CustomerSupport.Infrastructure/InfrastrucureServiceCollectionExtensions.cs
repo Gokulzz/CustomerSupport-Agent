@@ -72,6 +72,7 @@ public static class InfrastrucureServiceCollectionExtensions
         services.AddScoped<GetMySubscription>();
         services.AddScoped<ISupportTicketRepository, SupportTicketRepository>();
         services.AddScoped<CreateSupportTicket>();
+        services.AddScoped<EscalateSupportTicket>();
         services.AddScoped<DevelopmentDataSeeder>();
 
         return services;

@@ -107,6 +107,12 @@ public sealed class CreateSupportTicketTests
 
         public int AddCallCount { get; private set; }
 
+        public Task<SupportTicket?> GetByIdAndCustomerIdAsync(
+            Guid ticketId,
+            Guid customerId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<SupportTicket?>(null);
+
         public Task AddAsync(
             SupportTicket supportTicket,
             CancellationToken cancellationToken = default)
@@ -116,6 +122,9 @@ public sealed class CreateSupportTicketTests
 
             return Task.CompletedTask;
         }
+
+        public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider

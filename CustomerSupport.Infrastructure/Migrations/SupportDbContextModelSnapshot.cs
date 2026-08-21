@@ -133,6 +133,9 @@ namespace CustomerSupport.Infrastructure.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
 
+                    b.Property<DateTimeOffset?>("EscalatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<DateTimeOffset>("OpenedAtUtc")
                         .HasColumnType("datetimeoffset");
 
