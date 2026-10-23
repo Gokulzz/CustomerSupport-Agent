@@ -1,3 +1,4 @@
+using CustomerSupport.Api.Agents;
 using CustomerSupport.Api.Authentication;
 using CustomerSupport.Api.ExceptionHandling;
 using CustomerSupport.Api.Invoices;
@@ -42,6 +43,7 @@ app.MapAuthenticationEndpoints();
 app.MapSubscriptionEndpoints();
 app.MapInvoiceEndpoints();
 app.MapSupportTicketEndpoints();
+app.MapAgentEndpoints();
 
 app.Run();
 

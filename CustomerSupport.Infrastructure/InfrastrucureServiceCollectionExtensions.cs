@@ -3,6 +3,7 @@ using CustomerSupport.Application.Authentication;
 using CustomerSupport.Application.Invoices;
 using CustomerSupport.Application.Subscriptions;
 using CustomerSupport.Application.SupportTickets;
+using CustomerSupport.Infrastructure.Agents;
 using CustomerSupport.Infrastructure.Authentication;
 using CustomerSupport.Infrastructure.Identity;
 using CustomerSupport.Infrastructure.Persistence;
@@ -74,6 +75,7 @@ public static class InfrastrucureServiceCollectionExtensions
         services.AddScoped<CreateSupportTicket>();
         services.AddScoped<EscalateSupportTicket>();
         services.AddScoped<DevelopmentDataSeeder>();
+        services.AddCustomerSupportAgent(configuration);
 
         return services;
     }

@@ -5,4 +5,5 @@
   <Project Path="CustomerSupport.Domain.Tests/CustomerSupport.Domain.Tests.csproj" />
   <Project Path="CustomerSupport.Domain/CustomerSupport.Domain.csproj" />
   <Project Path="CustomerSupport.Infrastructure/CustomerSupport.Infrastructure.csproj" />
+  <Project Path="CustomerSupport.Infrastructure.Tests/CustomerSupport.Infrastructure.Tests.csproj" />
 </Solution>
