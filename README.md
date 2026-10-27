@@ -93,4 +93,4 @@ dotnet test
 
 xUnit tests cover Domain rules, Application use cases, the tool dispatcher, and bounded orchestration. Agent tests use a fake HTTP transport with the real SDK and do not make live OpenAI calls or require SQL Server.
 
-Further details: [Business scope](docs/BUSINESS_SCOPE.md), [Agent boundaries](docs/AGENT_BOUNDARIES.md), and [Agent setup](docs/AGENT_SETUP.md).
+Further details: [Business scope](docs/BUSINESS_Scope.md), [Agent boundaries](docs/AGENT_BOUNDARIES.md), and [Agent setup](docs/AGENT_SETUP.md).
