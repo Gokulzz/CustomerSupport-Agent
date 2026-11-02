@@ -24,8 +24,8 @@ internal static class AgentEndpoints
                 ["message"] = ["Message is required."]
             });
 
-        return Results.Ok(await agent.RespondAsync(request.Message, cancellationToken));
+        return Results.Ok(await agent.RespondAsync(request.Message, request.ConversationId, cancellationToken));
     }
 }
 
-internal sealed record AgentChatRequest(string? Message);
+internal sealed record AgentChatRequest(string? Message, Guid? ConversationId);

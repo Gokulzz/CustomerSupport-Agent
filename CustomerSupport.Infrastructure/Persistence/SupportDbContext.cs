@@ -1,4 +1,5 @@
-﻿using CustomerSupport.Domain.Customers;
+﻿using CustomerSupport.Domain.Conversation;
+using CustomerSupport.Domain.Customers;
 using CustomerSupport.Domain.Invoices;
 using CustomerSupport.Domain.Plans;
 using CustomerSupport.Domain.Subscriptions;
@@ -24,6 +25,8 @@ namespace CustomerSupport.Infrastructure.Persistence
         public DbSet<Invoice> Invoices => Set<Invoice>();
 
         public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
+        public DbSet<Conversation> Conversations => Set<Conversation>();    
+        public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

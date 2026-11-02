@@ -19,7 +19,7 @@ public sealed class DevelopmentDataSeeder(
     private const string BobEmail = "bob@clouddesk.test";
     private const string CharlieEmail = "charlie@clouddesk.test";
     private const string AlicePassword = "AliceDev!2026";
-    private const string BobPassword = "BobDev!2026";
+    private const string BobPassword = "BobDev!2026"; 
     private const string CharliePassword = "CharlieDev!2026";
 
     private static readonly DateTimeOffset ReferenceDateUtc =

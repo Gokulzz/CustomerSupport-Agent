@@ -4,17 +4,21 @@ using System.ClientModel.Primitives;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using CustomerSupport.Application.Authentication;
 using CustomerSupport.Domain.SupportTickets;
 using CustomerSupport.Infrastructure.Agents;
+using CustomerSupport.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using OpenAI.Responses;
 using Xunit;
 
 namespace CustomerSupport.Infrastructure.Tests.Agents;
 
-public sealed class OpenAICustomerSupportAgentTests
+public sealed class OpenAICustomerSupportAgentTest
 {
     [Fact]
     public async Task RequestInstructionsDefineSupportScopeAndOffTopicHandling()
@@ -223,7 +227,7 @@ public sealed class OpenAICustomerSupportAgentTests
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            CreateAgent(fixture, transport).RespondAsync("Invoices", cancellation.Token));
+            CreateAgent(fixture, transport).RespondAsync("Invoices",null, cancellation.Token));
         Assert.Empty(transport.Requests);
         Assert.Equal(0, fixture.Reads);
     }
@@ -231,13 +235,15 @@ public sealed class OpenAICustomerSupportAgentTests
     private static OpenAICustomerSupportAgent CreateAgent(
         AgentFixture fixture, FakeOpenAIHandler handler, ILogger<OpenAICustomerSupportAgent>? logger = null)
     {
+        var mock = new Mock<ICurrentCustomer>(); 
+        var dbContext = new Mock<SupportDbContext>(new DbContextOptionsBuilder<SupportDbContext>().Options, mock.Object);   
         var client = new ResponsesClient(new ApiKeyCredential("test-api-key"), new ResponsesClientOptions
         {
             Transport = new HttpClientPipelineTransport(new HttpClient(handler)),
             RetryPolicy = new ClientRetryPolicy(0)
         });
         return new OpenAICustomerSupportAgent(client, fixture.Dispatcher(),
-            Options.Create(new OpenAIOptions { Model = "test-model", ApiKey = "test-api-key" }),
+            Options.Create(new OpenAIOptions { Model = "test-model", ApiKey = "test-api-key" }), dbContext.Object, mock.Object,
             logger ?? NullLogger<OpenAICustomerSupportAgent>.Instance);
     }
 

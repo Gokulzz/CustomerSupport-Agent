@@ -1,6 +1,11 @@
 #pragma warning disable OPENAI001 // Responses API is marked experimental by the official SDK.
 using System.ClientModel;
 using CustomerSupport.Application.Agents;
+using CustomerSupport.Application.Authentication;
+using CustomerSupport.Domain.Conversation;
+using CustomerSupport.Domain.Conversation.Enum;
+using CustomerSupport.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenAI.Responses;
@@ -11,6 +16,8 @@ internal sealed class OpenAICustomerSupportAgent(
     ResponsesClient client,
     AgentToolDispatcher dispatcher,
     IOptions<OpenAIOptions> options,
+    SupportDbContext supportDbContext,
+    ICurrentCustomer currentCustomer,
     ILogger<OpenAICustomerSupportAgent> logger) : ICustomerSupportAgent
 {
     internal const int MaximumToolIterations = 5;
@@ -49,87 +56,216 @@ internal sealed class OpenAICustomerSupportAgent(
     """;
 
 
-    public async Task<AgentResponse> RespondAsync(string message, CancellationToken cancellationToken = default)
+   public async Task<AgentResponse> RespondAsync(
+    string message,
+    Guid? conversationId = null,
+    CancellationToken cancellationToken = default)
+{
+    ArgumentException.ThrowIfNullOrWhiteSpace(message);
+
+    var customerId = currentCustomer.CustomerId;
+
+    logger.LogInformation("Agent request started");
+
+    var turn = new AgentTurn();
+    var input = new List<ResponseItem>();
+
+    string? previousResponseId = null;
+    var toolCalls = 0;
+
+    Conversation? conversation;
+
+    if (conversationId.HasValue)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(message);
-        logger.LogInformation("Agent request started");
-        var turn = new AgentTurn();
-        var input = new List<ResponseItem> { ResponseItem.CreateUserMessageItem(message) };
-        string? previousResponseId = null;
-        var toolCalls = 0;
+        conversation = await supportDbContext.Conversations
+            .Include(x => x.Messages)
+            .SingleOrDefaultAsync(
+                x => x.CustomerId == customerId &&
+                     x.Id == conversationId.Value,
+                cancellationToken);
 
-        // Five rounds of tools plus one final response request to consume the last outputs.
-        for (var iteration = 0; iteration <= MaximumToolIterations; iteration++)
+        if (conversation is null)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var request = new CreateResponseOptions
-            {
-                Model = options.Value.Model,
-                Instructions = Instructions,
-                PreviousResponseId = previousResponseId,
-                ParallelToolCallsEnabled = false,
-                MaxOutputTokenCount = 4096
-            };
-            foreach (var tool in AgentTools.Create()) request.Tools.Add(tool);
-            foreach (var item in input) request.InputItems.Add(item);
+            logger.LogWarning(
+                "Conversation not found for customer {CustomerId} and conversation {ConversationId}",
+                customerId,
+                conversationId.Value);
 
-            ResponseResult response;
-            try
-            {
-                response = await client.CreateResponseAsync(request, cancellationToken);
-                logger.LogInformation( "Response Id: {ResponseId}, Status: {Status}, OutputCount: {OutputCount}",
-                                   response.Id,response.Status,response.OutputItems.Count);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception) when (exception is ClientResultException or HttpRequestException or OperationCanceledException)
-            {
-                // SDK errors can contain remote response bodies. Log only safe metadata.
-                logger.LogError("OpenAI request failed. FailureType: {FailureType}, Status: {Status}",
-                    exception.GetType().Name, (exception as ClientResultException)?.Status);
-                throw new InvalidOperationException("The customer-support AI service is unavailable.");
-            }
-
-            if (response.Status != ResponseStatus.Completed)
-            {
-                logger.LogWarning("OpenAI response did not complete");
-                return new AgentResponse(turn.FallbackMessage());
-            }
-            //filters everything except tool/function calls
-            var calls = response.OutputItems.OfType<FunctionCallResponseItem>().ToArray();
-            if (calls.Length == 0)
-            {
-                var text = response.GetOutputText();
-                return new AgentResponse(string.IsNullOrWhiteSpace(text) ? turn.FallbackMessage() : text);
-            }
-
-            if (iteration == MaximumToolIterations || calls.Length > MaximumToolCalls - toolCalls)
-            {
-                logger.LogWarning("Agent tool iteration limit reached. Iteration: {Iteration}, ToolCalls: {ToolCalls}",
-                    iteration, toolCalls);
-                return new AgentResponse(turn.FallbackMessage());
-            }
-
-            input.Clear();
-            foreach (var call in calls)
-            {
-                var safeName = AgentToolDispatcher.IsApproved(call.FunctionName) ? call.FunctionName : "unknown";
-                logger.LogInformation("Agent tool selected: {ToolName}, Iteration: {Iteration}", safeName, iteration);
-                var result = await dispatcher.ExecuteAsync(
-                    call.FunctionName, call.FunctionArguments.ToString(), turn, cancellationToken);
-                toolCalls++;
-                logger.LogInformation("Agent tool execution result: {ToolName}, Success: {Success}, ErrorCode: {ErrorCode}",
-                    safeName, result.Success, result.ErrorCode);
-                input.Add(ResponseItem.CreateFunctionCallOutputItem(call.CallId, result.ToJson()));
-            }
-
-            // The response ID retains all response items (including reasoning) and tool call IDs.
-            // It is local to this invocation and never accepted from the caller or persisted by this app.
-            previousResponseId = response.Id;
+            return new AgentResponse(turn.FallbackMessage());
         }
 
-        return new AgentResponse(turn.FallbackMessage());
+        // Rebuild previous conversation context.
+        foreach (var previousMessage in conversation.Messages
+                     .OrderBy(x => x.CreatedAtUtc))
+        {
+            if (previousMessage.Role == ConversationMessageRole.User)
+            {
+                input.Add(
+                    ResponseItem.CreateUserMessageItem(
+                        previousMessage.Content));
+            }
+            else if (previousMessage.Role == ConversationMessageRole.Assistant)
+            {
+                input.Add(
+                    ResponseItem.CreateAssistantMessageItem(
+                        previousMessage.Content));
+            }
+        }
     }
+    else
+    {
+        conversation = Conversation.Create(
+            customerId,
+            DateTimeOffset.UtcNow);
+
+        await supportDbContext.Conversations.AddAsync(
+            conversation,
+            cancellationToken);
+    }
+
+    // Persist current user message through the aggregate.
+    conversation.AddMessage(
+        ConversationMessageRole.User,
+        message,
+        DateTimeOffset.UtcNow);
+
+    // Current message must be last in the OpenAI context.
+    input.Add(ResponseItem.CreateUserMessageItem(message));
+        //limit the number of iterations to avoid infinite loops
+        for (var iteration = 0;
+         iteration <= MaximumToolIterations;
+         iteration++)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var request = new CreateResponseOptions
+        {
+            Model = options.Value.Model,
+            Instructions = Instructions,
+            PreviousResponseId = previousResponseId,
+            ParallelToolCallsEnabled = false,
+            MaxOutputTokenCount = 4096
+        };
+
+        foreach (var tool in AgentTools.Create())
+            request.Tools.Add(tool);
+
+        foreach (var item in input)
+            request.InputItems.Add(item);
+
+        ResponseResult response;
+
+        try
+        {
+            response = await client.CreateResponseAsync(
+                request,
+                cancellationToken);
+
+            logger.LogInformation(
+                "Response Id: {ResponseId}, Status: {Status}, OutputCount: {OutputCount}",
+                response.Id,
+                response.Status,
+                response.OutputItems.Count);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+            when (exception is ClientResultException
+                  or HttpRequestException
+                  or OperationCanceledException)
+        {
+            logger.LogError(
+                "OpenAI request failed. FailureType: {FailureType}, Status: {Status}",
+                exception.GetType().Name,
+                (exception as ClientResultException)?.Status);
+
+            throw new InvalidOperationException(
+                "The customer-support AI service is unavailable.");
+        }
+
+        if (response.Status != ResponseStatus.Completed)
+        {
+            logger.LogWarning(
+                "OpenAI response did not complete");
+
+            return new AgentResponse(
+                turn.FallbackMessage());
+        }
+            // Extract function calls from the response, ignoring any non-function-call output. 
+            var calls = response.OutputItems
+            .OfType<FunctionCallResponseItem>()
+            .ToArray();
+
+        if (calls.Length == 0)
+        {
+            var text = response.GetOutputText();
+
+            if (string.IsNullOrWhiteSpace(text))
+                text = turn.FallbackMessage();
+
+            conversation.AddMessage(
+                ConversationMessageRole.Assistant,
+                text,
+                DateTimeOffset.UtcNow);
+
+            await supportDbContext.SaveChangesAsync(
+                cancellationToken);
+
+            return new AgentResponse(text);
+        }
+
+        if (iteration == MaximumToolIterations ||
+            calls.Length > MaximumToolCalls - toolCalls)
+        {
+            logger.LogWarning(
+                "Agent tool iteration limit reached. Iteration: {Iteration}, ToolCalls: {ToolCalls}",
+                iteration,
+                toolCalls);
+
+            return new AgentResponse(
+                turn.FallbackMessage());
+        }
+
+        input.Clear();
+
+        foreach (var call in calls)
+        {
+            var safeName =
+                AgentToolDispatcher.IsApproved(call.FunctionName)
+                    ? call.FunctionName
+                    : "unknown";
+
+            logger.LogInformation(
+                "Agent tool selected: {ToolName}, Iteration: {Iteration}",
+                safeName,
+                iteration);
+
+            var result = await dispatcher.ExecuteAsync(
+                call.FunctionName,
+                call.FunctionArguments.ToString(),
+                turn,
+                cancellationToken);
+
+            toolCalls++;
+
+            logger.LogInformation(
+                "Agent tool execution result: {ToolName}, Success: {Success}, ErrorCode: {ErrorCode}",
+                safeName,
+                result.Success,
+                result.ErrorCode);
+
+            input.Add(
+                ResponseItem.CreateFunctionCallOutputItem(
+                    call.CallId,
+                    result.ToJson()));
+        }
+
+        previousResponseId = response.Id;
+    }
+
+    return new AgentResponse(turn.FallbackMessage());
+}
 }
