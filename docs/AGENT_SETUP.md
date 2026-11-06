@@ -1,7 +1,10 @@
 # First CloudDesk agent
 
-`POST /api/agent/chat` requires a JWT. Its only request field is `message`;
-the response contains `message`. Empty messages return validation ProblemDetails (400).
+`POST /api/agent/chat` requires a JWT. Send `message` and optionally `conversationId`;
+the response contains `message` and `conversationId`. Omit the ID for a new conversation,
+then reuse the returned ID to continue. Empty messages return validation ProblemDetails (400).
+Missing and other customers' conversation IDs receive the same generic fallback with a null ID,
+without calling OpenAI or modifying history.
 
 ## Configuration
 
@@ -33,7 +36,10 @@ repository access by the model, or model-selected customer identities.
 The official OpenAI .NET SDK sends strict function schemas. Each continuation supplies
 `previous_response_id` and `function_call_output` items with matching `call_id` values.
 Instructions and tools are supplied on every request. Response IDs are held only within
-one RespondAsync invocation; no history is accepted from the caller or stored locally.
+one RespondAsync invocation. User/assistant history is stored in SQL Server, not supplied by
+the caller. Ownership is checked before replaying at most 40 recent messages and 32,000
+characters, followed by the current message. Tool outputs are not persisted as history;
+the agent is instructed to verify current business data with tools.
 This uses Responses API server-side response storage for continuation (the API default).
 
 The loop allows at most five tool rounds and five individual calls total, even when a
@@ -50,11 +56,15 @@ confirmation gate. Confirmation remains guidance in the agent instructions.
 
 Escalation requires a valid, non-empty ticketId tool argument, but that ID need not
 appear in the original customer message. The existing Application use case continues
-to enforce authenticated customer ownership. There is no cross-request history.
+to enforce authenticated customer ownership. Prior history is context, not fresh write permission.
 
 Only one creation and one escalation can succeed per turn. Repeated model write calls
 are rejected. This prevents duplicate writes inside the tool loop; it does not provide
 cross-request idempotency for a client resubmitting a chat request.
+Send one request at a time per conversation: concurrent turns are not serialized.
+Normal and fallback replies are persisted. A remote failure after a successful write returns
+and stores an acknowledgement; cancellation, process crashes, or database failures can still
+leave a partial turn. Do not blindly retry state-changing requests.
 
 Logs contain event names, approved tool names, outcome codes, iteration counts and safe
 OpenAI failure metadata. They do not include customer messages, tool arguments, API keys,

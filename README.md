@@ -70,7 +70,7 @@ All routes except login require a JWT.
 | GET | `/api/invoices/me` | List the current customer's invoices |
 | GET | `/api/invoices/{invoiceId}/refund-eligibility` | Check an owned invoice's eligibility |
 | POST | `/api/support-tickets` | Create a ticket with `subject` and `description` |
-| POST | `/api/agent/chat` | Send `{ "message": "Show my invoices." }`; receive `{ "message": "..." }` |
+| POST | `/api/agent/chat` | Send `message` and optional `conversationId`; receive `message` and `conversationId` |
 
 Escalation is an internal Application capability exposed through the agent tool; it has no dedicated HTTP endpoint.
 
@@ -78,11 +78,11 @@ Escalation is an internal Application capability exposed through the agent tool;
 
 We use our own C# orchestration loop with the official OpenAI SDK, without an agent framework. The loop sends the customer's message and approved tool definitions to OpenAI, dispatches requested tools directly to existing Application use cases, and returns structured tool results to OpenAI until it produces a final answer or reaches the limit. It never calls this application's own HTTP API.
 
-Each chat request allows at most **five tool rounds and five tool calls**, with one final model request to consume the last results. State is limited to the current request.
+Each chat request allows at most **five tool rounds and five tool calls**, with one final model request to consume the last results. User/assistant messages are persisted; pass the returned `conversationId` to continue your own conversation. Replay uses at most 40 recent messages and 32,000 characters. OpenAI response IDs stay within one request.
 
 Only one ticket creation and one escalation can succeed per turn. Confirmation is currently prompt guidance, not a server-side approval gate; the dispatcher validates arguments and blocks duplicate successful writes. There is no cross-request idempotency.
 
-RAG, Qdrant, persistent conversation history, long-term memory, reflection, and multi-agent orchestration are not implemented.
+RAG, Qdrant, long-term memory/summarization, reflection, and multi-agent orchestration are not implemented. Concurrent turns and retry-safe writes are not yet supported; send one request at a time per conversation.
 
 ## Tests
 
@@ -91,6 +91,6 @@ dotnet build
 dotnet test
 ```
 
-xUnit tests cover Domain rules, Application use cases, the tool dispatcher, and bounded orchestration. Agent tests use a fake HTTP transport with the real SDK and do not make live OpenAI calls or require SQL Server.
+xUnit tests cover Domain rules, Application use cases, conversation persistence/ownership, the tool dispatcher, and bounded orchestration. Agent tests use isolated in-memory SQLite and a fake HTTP transport with the real SDK; they do not make live OpenAI calls or require SQL Server.
 
 Further details: [Business scope](docs/BUSINESS_Scope.md), [Agent boundaries](docs/AGENT_BOUNDARIES.md), and [Agent setup](docs/AGENT_SETUP.md).

@@ -4,22 +4,199 @@ using System.ClientModel.Primitives;
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using CustomerSupport.Application.Authentication;
+using CustomerSupport.Domain.Conversation;
+using CustomerSupport.Domain.Conversation.Enum;
+using CustomerSupport.Domain.Customers;
 using CustomerSupport.Domain.SupportTickets;
 using CustomerSupport.Infrastructure.Agents;
 using CustomerSupport.Infrastructure.Persistence;
+using CustomerSupport.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Moq;
 using OpenAI.Responses;
 using Xunit;
 
 namespace CustomerSupport.Infrastructure.Tests.Agents;
 
-public sealed class OpenAICustomerSupportAgentTest
+public sealed class OpenAICustomerSupportAgentTest : IDisposable
 {
+    private readonly ConversationTestDatabase database = new(new AgentFixture().CustomerId);
+    public void Dispose() => database.Dispose();
+
+    [Fact]
+    public async Task NewConversationReturnsIdAndPersistsBothMessagesUsingCurrentCustomerAndClock()
+    {
+        var fixture = new AgentFixture();
+        using var transport = new FakeOpenAIHandler(_ => Response("resp_1", Text("Your answer")));
+        var result = await CreateAgent(fixture, transport).RespondAsync("My question");
+
+        Assert.NotNull(result.ConversationId);
+        using var verification = database.CreateContext();
+        var conversation = await verification.Conversations.Include(x => x.Messages).SingleAsync();
+        Assert.Equal(result.ConversationId, conversation.Id);
+        Assert.Equal(fixture.CustomerId, conversation.CustomerId);
+        Assert.Equal(AgentFixture.Now.AddSeconds(1), conversation.CreatedAtUtc);
+        Assert.Equal(AgentFixture.Now.AddSeconds(3), conversation.UpdatedAtUtc);
+        var messages = conversation.Messages.OrderBy(x => x.CreatedAtUtc).ToArray();
+        Assert.Equal(new[] { "My question", "Your answer" }, messages.Select(x => x.Content));
+        Assert.Equal(new[] { ConversationMessageRole.User, ConversationMessageRole.Assistant }, messages.Select(x => x.Role));
+    }
+
+    [Fact]
+    public async Task OwnedConversationReplaysOrderedHistoryOnceAndAppendsNewTurn()
+    {
+        var fixture = new AgentFixture();
+        var conversation = Conversation.Create(fixture.CustomerId, AgentFixture.Now.AddMinutes(-5));
+        conversation.AddMessage(ConversationMessageRole.User, "Previous question", AgentFixture.Now.AddMinutes(-4));
+        conversation.AddMessage(ConversationMessageRole.Assistant, "Previous answer", AgentFixture.Now.AddMinutes(-3));
+        database.Context.Conversations.Add(conversation);
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
+        using var transport = new FakeOpenAIHandler(_ => Response("resp_1", Text("Follow-up answer")));
+
+        var result = await CreateAgent(fixture, transport).RespondAsync("Follow-up question", conversation.Id);
+
+        Assert.Equal(conversation.Id, result.ConversationId);
+        var input = Assert.Single(transport.Requests).GetProperty("input").EnumerateArray().ToArray();
+        Assert.Equal(new[] { "user", "assistant", "user" }, input.Select(x => x.GetProperty("role").GetString()));
+        Assert.Equal(new[] { "Previous question", "Previous answer", "Follow-up question" }, input.Select(InputText));
+        using var verification = database.CreateContext();
+        Assert.Equal(1, await verification.Conversations.CountAsync());
+        Assert.Equal(4, await verification.ConversationMessages.CountAsync());
+    }
+
+    [Fact]
+    public async Task ReturnedConversationIdResumesHistoryButNotPreviousOpenAIResponseId()
+    {
+        var fixture = new AgentFixture();
+        using var transport = new FakeOpenAIHandler(index => Response($"resp_{index}", Text($"Answer {index}")));
+        var agent = CreateAgent(fixture, transport);
+        var first = await agent.RespondAsync("First question");
+
+        var second = await agent.RespondAsync("Follow-up question", first.ConversationId);
+
+        Assert.Equal(first.ConversationId, second.ConversationId);
+        var request = transport.Requests[1];
+        Assert.True(!request.TryGetProperty("previous_response_id", out var previous) || previous.ValueKind == JsonValueKind.Null);
+        Assert.Equal(new[] { "First question", "Answer 0", "Follow-up question" }, request.GetProperty("input").EnumerateArray().Select(InputText));
+        using var verification = database.CreateContext();
+        Assert.Equal(4, await verification.ConversationMessages.CountAsync());
+    }
+
+    [Fact]
+    public async Task MissingAndOtherCustomersConversationsHaveSameResponseAndNeverCallOpenAI()
+    {
+        var fixture = new AgentFixture();
+        var otherCustomerId = Guid.NewGuid();
+        database.Context.Customers.Add(Customer.Create(otherCustomerId, "Other customer"));
+        var foreign = Conversation.Create(otherCustomerId, AgentFixture.Now.AddMinutes(-1));
+        foreign.AddMessage(ConversationMessageRole.User, "Private history", AgentFixture.Now);
+        database.Context.Conversations.Add(foreign);
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
+        using var transport = new FakeOpenAIHandler(_ => throw new InvalidOperationException("Must not call OpenAI"));
+        var agent = CreateAgent(fixture, transport);
+
+        var missing = await agent.RespondAsync("Hello", Guid.NewGuid());
+        var notOwned = await agent.RespondAsync("Hello", foreign.Id);
+
+        Assert.Equal(missing, notOwned);
+        Assert.Null(notOwned.ConversationId);
+        Assert.Empty(transport.Requests);
+        Assert.Equal(0, fixture.Reads);
+        using var verification = database.CreateContext();
+        Assert.Equal(1, await verification.ConversationMessages.CountAsync());
+    }
+
+    [Fact]
+    public async Task HistoryWindowUsesLatestMessagesWithoutDeletingOlderHistory()
+    {
+        var fixture = new AgentFixture();
+        var conversation = Conversation.Create(fixture.CustomerId, AgentFixture.Now.AddMinutes(-5));
+        var count = OpenAICustomerSupportAgent.MaximumHistoryMessages + 6;
+        for (var index = 0; index < count; index++)
+            conversation.AddMessage(index % 2 == 0 ? ConversationMessageRole.User : ConversationMessageRole.Assistant,
+                $"Message {index}", AgentFixture.Now.AddMinutes(-5).AddSeconds(index));
+        database.Context.Conversations.Add(conversation);
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
+        using var transport = new FakeOpenAIHandler(_ => Response("resp_1", Text("Answer")));
+
+        await CreateAgent(fixture, transport).RespondAsync("New question", conversation.Id);
+
+        var input = transport.Requests[0].GetProperty("input").EnumerateArray().ToArray();
+        Assert.Equal(OpenAICustomerSupportAgent.MaximumHistoryMessages + 1, input.Length);
+        Assert.Equal("Message 6", InputText(input[0]));
+        Assert.Equal("New question", InputText(input[^1]));
+        using var verification = database.CreateContext();
+        Assert.Equal(count + 2, await verification.ConversationMessages.CountAsync());
+    }
+
+    [Fact]
+    public async Task HistoryCharacterBudgetKeepsRecentContextWithoutTruncatingMessages()
+    {
+        var fixture = new AgentFixture();
+        var conversation = Conversation.Create(fixture.CustomerId, AgentFixture.Now.AddMinutes(-3));
+        conversation.AddMessage(ConversationMessageRole.User, new string('x', OpenAICustomerSupportAgent.MaximumHistoryCharacters), AgentFixture.Now.AddMinutes(-2));
+        conversation.AddMessage(ConversationMessageRole.Assistant, "Recent answer", AgentFixture.Now.AddMinutes(-1));
+        database.Context.Conversations.Add(conversation);
+        await database.Context.SaveChangesAsync();
+        database.Context.ChangeTracker.Clear();
+        using var transport = new FakeOpenAIHandler(_ => Response("resp_1", Text("Answer")));
+
+        await CreateAgent(fixture, transport).RespondAsync("New question", conversation.Id);
+
+        Assert.Equal(new[] { "Recent answer", "New question" }, transport.Requests[0].GetProperty("input").EnumerateArray().Select(InputText));
+    }
+
+    [Theory]
+    [InlineData("incomplete")]
+    [InlineData("limit")]
+    [InlineData("empty")]
+    public async Task FallbackResponsesPersistUserAndAssistantAndReturnConversationId(string scenario)
+    {
+        using var transport = new FakeOpenAIHandler(index => scenario switch
+        {
+            "incomplete" => JsonSerializer.Serialize(new { id = "resp_1", @object = "response", created_at = 1789905600, status = "incomplete", model = "test-model", output = Array.Empty<object>() }),
+            "limit" => Response($"resp_{index}", Call($"call_{index}", "get_invoices")),
+            _ => Response("resp_1", Text(" "))
+        });
+
+        var result = await CreateAgent(new AgentFixture(), transport).RespondAsync("My question");
+
+        Assert.NotNull(result.ConversationId);
+        Assert.Contains("couldn't complete", result.Message);
+        using var verification = database.CreateContext();
+        var messages = await verification.ConversationMessages.ToListAsync();
+        Assert.Equal(2, messages.Count);
+        Assert.Contains(messages, x => x.Role == ConversationMessageRole.Assistant && x.Content == result.Message);
+    }
+
+    private static string? InputText(JsonElement input) => input.GetProperty("content")[0].GetProperty("text").GetString();
+
+    [Fact]
+    public async Task OpenAIFailureAfterSuccessfulWritePersistsAcknowledgementAndDoesNotRepeatWrite()
+    {
+        var fixture = new AgentFixture();
+        using var transport = new FakeOpenAIHandler(index => index == 0
+            ? Response("resp_1", Call("call_1", "create_support_ticket", """{"subject":"Export","description":"Fails"}"""))
+            : """{"error":{"message":"remote service failure","type":"server_error"}}""",
+            statusForRequest: index => index == 0 ? HttpStatusCode.OK : HttpStatusCode.ServiceUnavailable);
+        var dispatcher = fixture.Dispatcher(new SupportTicketRepository(database.Context));
+
+        var result = await CreateAgent(fixture, transport, dispatcher: dispatcher).RespondAsync("Please create a ticket for the export failure.");
+
+        Assert.NotNull(result.ConversationId);
+        using var verification = database.CreateContext();
+        var ticket = await verification.SupportTickets.SingleAsync();
+        Assert.Contains(ticket.Id.ToString(), result.Message);
+        Assert.Contains("was created", result.Message);
+        Assert.Equal(2, await verification.ConversationMessages.CountAsync());
+        Assert.Equal(result.Message, (await verification.ConversationMessages.SingleAsync(x => x.Role == ConversationMessageRole.Assistant)).Content);
+    }
+
     [Fact]
     public async Task RequestInstructionsDefineSupportScopeAndOffTopicHandling()
     {
@@ -187,7 +364,8 @@ public sealed class OpenAICustomerSupportAgentTest
         await CreateAgent(new AgentFixture(), transport).RespondAsync("Hello");
         var expected = new Dictionary<string, string[]>
         {
-            ["get_subscription"] = [], ["get_invoices"] = [],
+            ["get_subscription"] = [],
+            ["get_invoices"] = [],
             ["check_refund_eligibility"] = ["invoiceId"],
             ["create_support_ticket"] = ["description", "subject"],
             ["escalate_to_human"] = ["ticketId"]
@@ -217,6 +395,9 @@ public sealed class OpenAICustomerSupportAgentTest
         Assert.DoesNotContain("sensitive", exception.ToString());
         Assert.Contains(logger.Messages, entry => entry.Contains("OpenAI request failed"));
         Assert.DoesNotContain(logger.Messages, entry => entry.Contains("sensitive") || entry.Contains("private customer message") || entry.Contains("test-api-key"));
+        using var verification = database.CreateContext();
+        Assert.Empty(await verification.Conversations.ToListAsync());
+        Assert.Empty(await verification.ConversationMessages.ToListAsync());
     }
 
     [Fact]
@@ -227,24 +408,31 @@ public sealed class OpenAICustomerSupportAgentTest
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            CreateAgent(fixture, transport).RespondAsync("Invoices",null, cancellation.Token));
+            CreateAgent(fixture, transport).RespondAsync("Invoices", null, cancellation.Token));
         Assert.Empty(transport.Requests);
         Assert.Equal(0, fixture.Reads);
+        Assert.Empty(database.Context.ChangeTracker.Entries<Conversation>());
     }
 
-    private static OpenAICustomerSupportAgent CreateAgent(
-        AgentFixture fixture, FakeOpenAIHandler handler, ILogger<OpenAICustomerSupportAgent>? logger = null)
+    private OpenAICustomerSupportAgent CreateAgent(
+        AgentFixture fixture, FakeOpenAIHandler handler, ILogger<OpenAICustomerSupportAgent>? logger = null,
+        SupportDbContext? context = null, AgentToolDispatcher? dispatcher = null)
     {
-        var mock = new Mock<ICurrentCustomer>(); 
-        var dbContext = new Mock<SupportDbContext>(new DbContextOptionsBuilder<SupportDbContext>().Options, mock.Object);   
         var client = new ResponsesClient(new ApiKeyCredential("test-api-key"), new ResponsesClientOptions
         {
             Transport = new HttpClientPipelineTransport(new HttpClient(handler)),
             RetryPolicy = new ClientRetryPolicy(0)
         });
-        return new OpenAICustomerSupportAgent(client, fixture.Dispatcher(),
-            Options.Create(new OpenAIOptions { Model = "test-model", ApiKey = "test-api-key" }), dbContext.Object, mock.Object,
+        return new OpenAICustomerSupportAgent(client, dispatcher ?? fixture.Dispatcher(),
+            Options.Create(new OpenAIOptions { Model = "test-model", ApiKey = "test-api-key" }), context ?? database.Context, fixture,
+            new TestClock(),
             logger ?? NullLogger<OpenAICustomerSupportAgent>.Instance);
+    }
+
+    private sealed class TestClock : TimeProvider
+    {
+        private DateTimeOffset now = AgentFixture.Now;
+        public override DateTimeOffset GetUtcNow() => now = now.AddSeconds(1);
     }
 
     private static object Call(string id, string name, string args = "{}") =>
@@ -252,16 +440,25 @@ public sealed class OpenAICustomerSupportAgentTest
 
     private static object Text(string text) => new
     {
-        type = "message", id = "msg_1", status = "completed", role = "assistant",
+        type = "message",
+        id = "msg_1",
+        status = "completed",
+        role = "assistant",
         content = new[] { new { type = "output_text", text, annotations = Array.Empty<object>() } }
     };
 
     private static string Response(string id, params object[] output) => JsonSerializer.Serialize(new
     {
-        id, @object = "response", created_at = 1789905600, status = "completed", model = "test-model", output
+        id,
+        @object = "response",
+        created_at = 1789905600,
+        status = "completed",
+        model = "test-model",
+        output
     });
 
-    private sealed class FakeOpenAIHandler(Func<int, string> response, HttpStatusCode status = HttpStatusCode.OK) : HttpMessageHandler
+    private sealed class FakeOpenAIHandler(Func<int, string> response, HttpStatusCode status = HttpStatusCode.OK,
+        Func<int, HttpStatusCode>? statusForRequest = null) : HttpMessageHandler
     {
         public List<JsonElement> Requests { get; } = [];
 
@@ -270,7 +467,7 @@ public sealed class OpenAICustomerSupportAgentTest
             Assert.Equal("/v1/responses", request.RequestUri!.AbsolutePath);
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
             Requests.Add(json.RootElement.Clone());
-            return new HttpResponseMessage(status)
+            return new HttpResponseMessage(statusForRequest?.Invoke(Requests.Count - 1) ?? status)
             {
                 Content = new StringContent(response(Requests.Count - 1), Encoding.UTF8, "application/json")
             };

@@ -24,11 +24,11 @@ internal sealed class AgentFixture : ICurrentCustomer, ISubscriptionQuery, IInvo
     public int Saves { get; private set; }
     public Exception? ReadFailure { get; set; }
 
-    public AgentToolDispatcher Dispatcher() => new(
+    public AgentToolDispatcher Dispatcher(ISupportTicketRepository? repository = null) => new(
         new GetMySubscription(this, this), new GetMyInvoices(this, this),
         new CheckRefundEligibility(this, this, new FixedClock()),
-        new CreateSupportTicket(this, this, new FixedClock()),
-        new EscalateSupportTicket(this, this, new FixedClock()));
+        new CreateSupportTicket(this, repository ?? this, new FixedClock()),
+        new EscalateSupportTicket(this, repository ?? this, new FixedClock()));
 
     Task<SubscriptionDto?> ISubscriptionQuery.GetByCustomerIdAsync(Guid customerId, CancellationToken cancellationToken)
     {

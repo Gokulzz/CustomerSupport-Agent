@@ -14,18 +14,24 @@ namespace CustomerSupport.Domain.Conversation
         private ConversationMessage() { }
         public static ConversationMessage Create(Guid conversationId, ConversationMessageRole role, string content, DateTimeOffset dateTime)
         {
+            if (conversationId == Guid.Empty)
+                throw new ArgumentException("Conversation ID cannot be empty.", nameof(conversationId));
+            if (!System.Enum.IsDefined(role))
+                throw new ArgumentOutOfRangeException(nameof(role));
+            ArgumentException.ThrowIfNullOrWhiteSpace(content);
+
             return new ConversationMessage
             {
                 Id = Guid.NewGuid(),
                 ConversationId = conversationId,
                 Role = role,
                 Content = content,
-                CreatedAtUtc = dateTime
+                CreatedAtUtc = dateTime.ToUniversalTime()
             };
-        }   
+        }
 
-      
+
     }
 
-    
-    }
+
+}

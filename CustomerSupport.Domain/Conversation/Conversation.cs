@@ -20,8 +20,8 @@ namespace CustomerSupport.Domain.Conversation
             {
                 Id = Guid.NewGuid(),
                 CustomerId = customerId,
-                CreatedAtUtc = dateTime,
-                UpdatedAtUtc = dateTime
+                CreatedAtUtc = dateTime.ToUniversalTime(),
+                UpdatedAtUtc = dateTime.ToUniversalTime()
             };
         }  
         public void AddMessage(ConversationMessageRole messagRole, string content, DateTimeOffset now)  
